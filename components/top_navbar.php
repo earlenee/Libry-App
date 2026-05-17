@@ -24,6 +24,13 @@ else if ($current_file == 'cart.php') $page_title = "Cart";
       </div>
     </div>
 <?php
+  // Hapus notifikasi 'Complete your profile' secara total agar tidak pernah muncul lagi
+  if (isset($_SESSION['notifications'])) {
+      $_SESSION['notifications'] = array_filter($_SESSION['notifications'], function($notif) {
+          return strtolower($notif['title']) !== 'complete your profile';
+      });
+      $_SESSION['notifications'] = array_values($_SESSION['notifications']);
+  }
   $notifications = isset($_SESSION['notifications']) ? $_SESSION['notifications'] : [];
   $notif_count = count($notifications);
 ?>
