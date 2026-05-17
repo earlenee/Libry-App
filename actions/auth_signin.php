@@ -57,13 +57,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 'message' => 'You have successfully logged in. Enjoy reading and exploring the Libry book collection.',
                 'time' => 'Just now'
             ];
-            $_SESSION['notifications'][] = [
-                'icon' => 'info',
-                'color' => '#f59f00',
-                'title' => 'Complete your profile',
-                'message' => 'Add a profile picture and update your personal information to get started.',
-                'time' => '1 hour ago'
-            ];
 
             echo "<script>alert('Login successful! Welcome ".$user['name']."'); window.location.href='../page/dashboard.php';</script>";
         } else {
