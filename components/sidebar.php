@@ -5,7 +5,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
   <script>
     if (localStorage.getItem('sidebarState') === 'closed') {
       document.getElementById('main-sidebar').classList.add('closed');
-      // Matikan transisi sementara agar tidak ada animasi saat pertama kali load
+      // matiin transisi biar ga kedip pas pertama load
       document.getElementById('main-sidebar').style.transition = 'none';
       setTimeout(() => document.getElementById('main-sidebar').style.transition = '', 50);
     }

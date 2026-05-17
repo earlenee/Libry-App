@@ -1,13 +1,13 @@
 <?php
+// file koneksi ke database
 $host = "localhost";
-$user = "root";       // Username default MySQL di Laragon/XAMPP
-$pass = "";           // Password default biasanya kosong
-$db   = "libry_db";   // Nama database yang akan kita buat
+$user = "root";
+$pass = "";
+$db   = "libry_db";
 
-// Membuat koneksi ke database
 $conn = new mysqli($host, $user, $pass, $db);
 
-// Mengecek koneksi
+// cek koneksi biar ga error
 if ($conn->connect_error) {
     die("Koneksi gagal: " . $conn->connect_error);
 }

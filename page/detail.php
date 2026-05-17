@@ -5,27 +5,41 @@ if (!isset($_SESSION['user_id'])) {
     exit;
 }
 
-if (!isset($_SESSION['cart'])) { $_SESSION['cart'] = []; }
-if (!isset($_SESSION['favorites'])) { $_SESSION['favorites'] = []; }
-if (!isset($_SESSION['purchased'])) { $_SESSION['purchased'] = []; }
-
+$user_id = $_SESSION['user_id'];
 $book_id = isset($_GET['id']) ? intval($_GET['id']) : 0;
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if (file_exists('../config/koneksi.php')) {
+    require_once '../config/koneksi.php';
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($conn)) {
     if (isset($_POST['action'])) {
         if ($_POST['action'] === 'add_cart') {
-            if (!in_array($book_id, $_SESSION['cart'])) {
-                $_SESSION['cart'][] = $book_id;
+            // cek udah ada di cart belum
+            $check = $conn->prepare("SELECT id FROM cart WHERE user_id = ? AND book_id = ?");
+            $check->bind_param("ii", $user_id, $book_id);
+            $check->execute();
+            $check_res = $check->get_result();
+            if ($check_res && $check_res->num_rows == 0) {
+                $ins = $conn->prepare("INSERT INTO cart (user_id, book_id) VALUES (?, ?)");
+                $ins->bind_param("ii", $user_id, $book_id);
+                $ins->execute();
             }
             header("Location: detail.php?id=" . $book_id . "&cart_added=1");
             exit;
         } elseif ($_POST['action'] === 'toggle_favorite') {
-            if (($key = array_search($book_id, $_SESSION['favorites'])) !== false) {
-                unset($_SESSION['favorites'][$key]);
-                // Reindex array
-                $_SESSION['favorites'] = array_values($_SESSION['favorites']);
+            $check = $conn->prepare("SELECT id FROM favourites WHERE user_id = ? AND book_id = ?");
+            $check->bind_param("ii", $user_id, $book_id);
+            $check->execute();
+            $check_res = $check->get_result();
+            if ($check_res && $check_res->num_rows > 0) {
+                $del = $conn->prepare("DELETE FROM favourites WHERE user_id = ? AND book_id = ?");
+                $del->bind_param("ii", $user_id, $book_id);
+                $del->execute();
             } else {
-                $_SESSION['favorites'][] = $book_id;
+                $ins = $conn->prepare("INSERT INTO favourites (user_id, book_id) VALUES (?, ?)");
+                $ins->bind_param("ii", $user_id, $book_id);
+                $ins->execute();
             }
             header("Location: detail.php?id=" . $book_id);
             exit;
@@ -35,44 +49,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $book = null;
 
-if (file_exists('../config/koneksi.php')) {
-    require_once '../config/koneksi.php';
-    if (isset($conn) && !$conn->connect_error) {
-        $stmt = $conn->prepare("SELECT * FROM books WHERE id = ?");
-        if ($stmt) {
-            $stmt->bind_param("i", $book_id);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            if ($result && $result->num_rows > 0) {
-                $book = $result->fetch_assoc();
-            }
-            $stmt->close();
+if (isset($conn) && !$conn->connect_error) {
+    $stmt = $conn->prepare("SELECT * FROM books WHERE id = ?");
+    if ($stmt) {
+        $stmt->bind_param("i", $book_id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        if ($result && $result->num_rows > 0) {
+            $book = $result->fetch_assoc();
         }
+        $stmt->close();
     }
 }
 
-// Fallback mock data if DB fails or book not found
 if (!$book) {
     $book = [
         'id' => $book_id,
-        'title' => 'Sejarah Indonesia SMA/MA/SMK Kelas 10',
-        'author' => 'Samsul Farid',
-        'cover_image' => 'logo.png', // Fallback image
-        'price' => 75000,
-        'publisher' => 'Yrama Widya',
-        'publication_date' => '2016-08-11',
-        'description' => 'Buku Sejarah Indonesia kelas X Kurikulum 2013 bertujuan membantu siswa tidak hanya menghafal, tetapi juga memahami, menulis, dan menganalisis peristiwa sejarah, serta mengaitkannya dengan konteks lokal, nasional, dan global. Dengan pendekatan regresif, siswa diajak mengamati kondisi sosial-budaya dan warisan sejarah saat ini. Siswa juga diharapkan mencari sumber lain dan mengambil nilai-nilai sejarah untuk menumbuhkan rasa cinta tanah air dan nasionalisme.'
+        'title' => 'Book Not Found',
+        'author' => 'Unknown Author',
+        'cover_image' => 'logo.png',
+        'price' => 0,
+        'publisher' => 'Unknown Publisher',
+        'publication_date' => null,
+        'description' => 'This book could not be found in the database.'
     ];
 }
 
 $price_formatted = "Rp. " . number_format($book['price'] ?? 0, 0, ',', '.');
-$publisher = $book['publisher'] ?? 'Yrama Widya';
-$pub_date = isset($book['publication_date']) ? date('d M Y', strtotime($book['publication_date'])) : '11 Agu 2016';
+$publisher = $book['publisher'] ?? 'N/A';
+$pub_date = !empty($book['publication_date']) ? date('d M Y', strtotime($book['publication_date'])) : 'N/A';
 $description = $book['description'] ?? 'No description available for this book.';
 
-$in_cart = in_array($book_id, $_SESSION['cart']);
-$is_favorite = in_array($book_id, $_SESSION['favorites']);
-$is_purchased = in_array($book_id, $_SESSION['purchased']);
+$in_cart = false;
+$is_favorite = false;
+$is_purchased = false;
+
+if (isset($conn)) {
+    $c_stmt = $conn->prepare("SELECT id FROM cart WHERE user_id = ? AND book_id = ?");
+    $c_stmt->bind_param("ii", $user_id, $book_id);
+    $c_stmt->execute();
+    if ($c_stmt->get_result()->num_rows > 0) $in_cart = true;
+    
+    $f_stmt = $conn->prepare("SELECT id FROM favourites WHERE user_id = ? AND book_id = ?");
+    $f_stmt->bind_param("ii", $user_id, $book_id);
+    $f_stmt->execute();
+    if ($f_stmt->get_result()->num_rows > 0) $is_favorite = true;
+    
+    $p_stmt = $conn->prepare("SELECT id FROM purchases WHERE user_id = ? AND book_id = ?");
+    $p_stmt->bind_param("ii", $user_id, $book_id);
+    $p_stmt->execute();
+    if ($p_stmt->get_result()->num_rows > 0) $is_purchased = true;
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -181,11 +208,11 @@ $is_purchased = in_array($book_id, $_SESSION['purchased']);
 
             <div class="bd-meta">
               <div class="meta-item">
-                <h4>Penerbit</h4>
+                <h4>Publisher</h4>
                 <p><?php echo htmlspecialchars($publisher); ?></p>
               </div>
               <div class="meta-item">
-                <h4>Tanggal Terbit</h4>
+                <h4>Publication Date</h4>
                 <p><?php echo htmlspecialchars($pub_date); ?></p>
               </div>
             </div>
@@ -202,23 +229,10 @@ $is_purchased = in_array($book_id, $_SESSION['purchased']);
           <div class="reviews-section">
             <h3 style="font-family: 'Hammersmith One', sans-serif; font-size: 24px; color: var(--dark); margin-bottom: 24px;">Reader Reviews</h3>
             
-            <div class="review-card">
-              <div class="review-header">
-                <div class="reviewer-name">Alex Johnson</div>
-                <div class="review-stars">★★★★★</div>
-              </div>
-              <div class="review-text">An incredibly insightful and engaging read! The author presents complex ideas in a way that is highly accessible without losing any of the nuance. Highly recommended for anyone interested in this topic.</div>
+            <div style="text-align: center; padding: 40px 20px;">
+              <svg width="48" height="48" fill="none" stroke="var(--text-muted)" stroke-width="1.5" viewBox="0 0 24 24" style="opacity: 0.3; margin-bottom: 12px;"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+              <p style="font-family: 'Inter', sans-serif; font-size: 14px; color: var(--text-muted); margin: 0;">No reviews yet. Be the first to share your thoughts!</p>
             </div>
-
-            <div class="review-card">
-              <div class="review-header">
-                <div class="reviewer-name">Sarah Williams</div>
-                <div class="review-stars">★★★★☆</div>
-              </div>
-              <div class="review-text">Very well written and informative. I learned a lot from the historical context provided. The only reason it's not 5 stars is because the pacing in the middle chapters felt a bit slow, but overall a great addition to my library.</div>
-            </div>
-            
-            <button class="btn-profile-secondary" style="width: 100%; margin-top: 16px; border: 1px dashed rgba(0,0,0,0.2); background: transparent;" onclick="alert('Review submission coming soon!')">Write a Review</button>
           </div>
         </div>
       </div>

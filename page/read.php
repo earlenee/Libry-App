@@ -5,8 +5,11 @@ if (!isset($_SESSION['user_id'])) {
     exit;
 }
 
+$user_id = $_SESSION['user_id'];
 $book_id = isset($_GET['id']) ? intval($_GET['id']) : 0;
 $book = null;
+$user_book_data = null;
+$book_content = "";
 
 if (file_exists('../config/koneksi.php')) {
     require_once '../config/koneksi.php';
@@ -18,25 +21,31 @@ if (file_exists('../config/koneksi.php')) {
             $result = $stmt->get_result();
             if ($result && $result->num_rows > 0) {
                 $book = $result->fetch_assoc();
+                $book_content = $book['content'] ?? "Content coming soon...";
+            }
+        }
+        
+        $stmt_ubd = $conn->prepare("SELECT * FROM user_book_data WHERE user_id = ? AND book_id = ?");
+        if ($stmt_ubd) {
+            $stmt_ubd->bind_param("ii", $user_id, $book_id);
+            $stmt_ubd->execute();
+            $res_ubd = $stmt_ubd->get_result();
+            if ($res_ubd && $res_ubd->num_rows > 0) {
+                $user_book_data = $res_ubd->fetch_assoc();
+                // kalo ada html yg udah di-highlight, pake itu aja
+                if (!empty($user_book_data['highlighted_html'])) {
+                    $book_content = $user_book_data['highlighted_html'];
+                }
             }
         }
     }
 }
 
-// Simulated book content (Lorem Ipsum formatted as chapters)
-$dummy_content = "
-<h2>Chapter 1: The Beginning</h2>
-<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</p>
-<p>Curabitur pretium tincidunt lacus. Nulla gravida orci a odio. Nullam varius, turpis et commodo pharetra, est eros bibendum elit, nec luctus magna felis sollicitudin mauris. Integer in mauris eu nibh euismod gravida. Duis ac tellus et risus vulputate vehicula. Donec lobortis risus a elit. Etiam tempor. Ut ullamcorper, ligula eu tempor congue, eros est euismod turpis, id tincidunt sapien risus a quam. Maecenas fermentum consequat mi. Donec fermentum. Pellentesque malesuada nulla a mi.</p>
+// ambil tema & ukuran font dari session
+$theme = isset($_SESSION['theme']) ? $_SESSION['theme'] : 'light';
+$font_size = isset($_SESSION['font_size']) ? intval($_SESSION['font_size']) : 20;
+$saved_progress = isset($user_book_data['progress_percent']) ? intval($user_book_data['progress_percent']) : 0;
 
-<h2>Chapter 2: The Journey</h2>
-<p>Duis sapien sem, aliquet nec, commodo eget, consequat quis, neque. Aliquam faucibus, elit ut dictum aliquet, felis nisl adipiscing sapien, sed malesuada diam lacus eget erat. Cras mollis scelerisque nunc. Nullam arcu. Aliquam consequat. Curabitur augue lorem, dapibus quis, laoreet et, pretium ac, nisi. Aenean magna nisl, mollis quis, molestie eu, feugiat in, orci. In hac habitasse platea dictumst.</p>
-<p>Fusce convallis, mauris imperdiet gravida bibendum, nisl turpis suscipit mauris, sed placerat ipsum urna sed risus. In convallis tellus a mauris. Curabitur non elit ut libero tristique sodales. Mauris a lacus. Donec mattis semper leo. In hac habitasse platea dictumst. Vivamus facilisis diam vel magna. Mauris tincidunt sem sed arcu. Nunc posuere.</p>
-
-<h2>Chapter 3: The Resolution</h2>
-<p>Pellentesque ipsum. Cum sociis natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus. Nunc tristique, ante at tristique vulputate, odio turpis iaculis lorem, a volutpat lacus magna nec urna. Aenean iaculis, tellus at iaculis congue, quam mauris bibendum mauris, condimentum porta dolor neque sed sapien. Fusce et metus. Fusce neque sem, iaculis varius, egestas interdum, vestibulum at, tellus.</p>
-<p>Morbi mattis. Vestibulum condimentum velit aliquet odio. Ut magna metus, egestas at, egestas eu, fermentum eu, justo. Donec nec velit eget risus facilisis feugiat. Nunc pretium urna id ipsum. Vivamus et elit. Proin dictum est et ante. Aenean sed sapien quis nulla semper feugiat. Integer ut mauris. Donec interdum hendrerit arcu. Phasellus semper pulvinar odio. Nam dictum pellentesque eros. Sed varius mauris ac enim. Sed viverra.</p>
-";
 
 ?>
 <!DOCTYPE html>
@@ -218,7 +227,7 @@ $dummy_content = "
     .reading-progress-container {
       position: fixed;
       bottom: 0; left: 0; right: 0;
-      height: 4px;
+      height: 12px;
       background: rgba(128,128,128,0.2);
       z-index: 1000;
     }
@@ -267,19 +276,24 @@ $dummy_content = "
             <div onclick="setTheme('dark')" style="flex: 1; height: 32px; background: #1a1a1a; border: 1px solid #444; border-radius: 8px; cursor: pointer;" title="Dark"></div>
           </div>
         </div>
+      </div>
       <div style="position: relative;">
-        <button class="btn-reader-action" title="Bookmark" onclick="addBookmark(event)">
+        <button class="btn-reader-action" title="Bookmark" onclick="addBookmark(event)" onmousedown="event.preventDefault()">
           <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"></path></svg>
         </button>
         <!-- Bookmark Colors Dropdown -->
-        <div id="bookmark-colors-dropdown" style="display: none; position: absolute; top: 100%; right: 0; background: white; padding: 12px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); width: 150px; margin-top: 8px; z-index: 1000;">
-          <div style="font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 600; color: gray; margin-bottom: 8px;">Pilih Warna Stabilo</div>
-          <div style="display: flex; gap: 8px; justify-content: space-around;">
-             <div onclick="applyBookmark('#fff033')" style="width: 24px; height: 24px; background: #fff033; border-radius: 50%; cursor: pointer; border: 1px solid #ddd;" title="Kuning"></div>
-             <div onclick="applyBookmark('#7df37d')" style="width: 24px; height: 24px; background: #7df37d; border-radius: 50%; cursor: pointer; border: 1px solid #ddd;" title="Hijau"></div>
-             <div onclick="applyBookmark('#7dcbf3')" style="width: 24px; height: 24px; background: #7dcbf3; border-radius: 50%; cursor: pointer; border: 1px solid #ddd;" title="Biru"></div>
-             <div onclick="applyBookmark('#ff96ca')" style="width: 24px; height: 24px; background: #ff96ca; border-radius: 50%; cursor: pointer; border: 1px solid #ddd;" title="Pink"></div>
+        <div id="bookmark-colors-dropdown" style="display: none; position: absolute; top: 100%; right: 0; background: white; padding: 12px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); width: 180px; margin-top: 8px; z-index: 1000;">
+          <div style="font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 600; color: gray; margin-bottom: 8px;">Select Highlight Color</div>
+          <div style="display: flex; gap: 8px; justify-content: space-around; margin-bottom: 12px;">
+             <div onclick="applyBookmark('#fff033')" onmousedown="event.preventDefault()" style="width: 24px; height: 24px; background: #fff033; border-radius: 50%; cursor: pointer; border: 1px solid #ddd;" title="Yellow"></div>
+             <div onclick="applyBookmark('#7df37d')" onmousedown="event.preventDefault()" style="width: 24px; height: 24px; background: #7df37d; border-radius: 50%; cursor: pointer; border: 1px solid #ddd;" title="Green"></div>
+             <div onclick="applyBookmark('#7dcbf3')" onmousedown="event.preventDefault()" style="width: 24px; height: 24px; background: #7dcbf3; border-radius: 50%; cursor: pointer; border: 1px solid #ddd;" title="Blue"></div>
+             <div onclick="applyBookmark('#ff96ca')" onmousedown="event.preventDefault()" style="width: 24px; height: 24px; background: #ff96ca; border-radius: 50%; cursor: pointer; border: 1px solid #ddd;" title="Pink"></div>
           </div>
+          <button onclick="applyBookmark('remove')" onmousedown="event.preventDefault()" style="width: 100%; padding: 6px 0; border: 1px solid #ff4d4d; background: #fff0f0; color: #ff4d4d; border-radius: 6px; cursor: pointer; font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 4px;">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+            Remove Bookmark
+          </button>
         </div>
       </div>
     </div>
@@ -294,7 +308,7 @@ $dummy_content = "
       </div>
       
       <div class="reader-body" id="readerBody">
-        <?php echo $dummy_content; ?>
+        <?php echo !empty($book_content) ? $book_content : '<p style="text-align:center; color:#999; margin-top:40px;">No content available for this book.</p>'; ?>
       </div>
       
       <!-- Done Reading Indicator -->
@@ -328,18 +342,45 @@ $dummy_content = "
   <script>
     const bookId = <?php echo $book_id; ?>;
     
-    // Update reading progress bar and save
-    window.addEventListener('scroll', () => {
-      const winScroll = document.body.scrollTop || document.documentElement.scrollTop;
+    let scrollTimeout;
+    let currentProgress = <?php echo $saved_progress; ?>;
+    
+    function calculateProgress() {
       const height = document.documentElement.scrollHeight - document.documentElement.clientHeight;
-      const scrolled = height > 0 ? (winScroll / height) * 100 : 0;
+      if (height <= 0) {
+        // konten muat di layar tanpa scroll = udah 100% dibaca
+        return 100;
+      }
+      const winScroll = document.body.scrollTop || document.documentElement.scrollTop;
+      return Math.min(Math.round((winScroll / height) * 100), 100);
+    }
+    
+    function saveProgress(progress, force) {
+      if (bookId > 0 && (force || progress > currentProgress)) {
+        currentProgress = Math.max(currentProgress, progress);
+        fetch('../actions/sync_book_data.php', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            book_id: bookId,
+            progress: progress
+          })
+        });
+      }
+    }
+    
+    // update progress bar pas scroll & simpan ke db
+    window.addEventListener('scroll', () => {
+      const scrolled = calculateProgress();
       document.getElementById('progressBar').style.width = scrolled + '%';
       
       if (bookId > 0 && scrolled > 0) {
-        localStorage.setItem('libry_progress_' + bookId, Math.round(scrolled));
+        // pake debounce biar ga spam request ke server
+        clearTimeout(scrollTimeout);
+        scrollTimeout = setTimeout(() => saveProgress(scrolled), 1000);
       }
       
-      // Done reading logic
+      // cek udah selesai baca belum
       const doneIndicator = document.getElementById('doneReadingIndicator');
       if (doneIndicator) {
         if (scrolled >= 99) {
@@ -347,8 +388,35 @@ $dummy_content = "
         }
       }
     });
+    
+    // simpen progress pas user mau ninggalin halaman
+    window.addEventListener('beforeunload', () => {
+      const scrolled = calculateProgress();
+      if (bookId > 0 && scrolled > currentProgress) {
+        // pake sendBeacon biar datanya tetep kekirim walaupun halaman ditutup
+        const data = JSON.stringify({ book_id: bookId, progress: scrolled });
+        const blob = new Blob([data], { type: 'application/json' });
+        navigator.sendBeacon('../actions/sync_book_data.php', blob);
+      }
+    });
+    
+    // langsung simpen progress pas halaman dibuka
+    document.addEventListener('DOMContentLoaded', () => {
+      const scrolled = calculateProgress();
+      document.getElementById('progressBar').style.width = scrolled + '%';
+      
+      // biar continue reading langsung kebaca di dashboard
+      if (bookId > 0) {
+        saveProgress(Math.max(scrolled, 1), true);
+      }
+      
+      if (scrolled >= 100) {
+        const doneIndicator = document.getElementById('doneReadingIndicator');
+        if (doneIndicator) doneIndicator.style.display = 'block';
+      }
+    });
 
-    // Auto-hide topbar on scroll down, show on scroll up
+    // auto sembunyiin topbar pas scroll kebawah, muncul lagi pas scroll keatas
     let lastScrollTop = 0;
     const topbar = document.getElementById('readerTopbar');
     
@@ -362,7 +430,7 @@ $dummy_content = "
       lastScrollTop = st <= 0 ? 0 : st;
     }, false);
 
-    // Settings Toggle
+    // toggle panel pengaturan
     function toggleReaderSettings(e) {
       e.stopPropagation();
       document.getElementById('bookmark-colors-dropdown').style.display = 'none';
@@ -375,14 +443,24 @@ $dummy_content = "
       const selection = window.getSelection();
       const text = selection.toString().trim();
       
-      const notifArea = document.getElementById('toast-notification') || createToastContainer();
+      let existingHighlight = false;
+      if (selection.rangeCount > 0) {
+          let node = selection.getRangeAt(0).commonAncestorContainer;
+          while (node && node.id !== 'readerBody') {
+              if (node.nodeType === 1 && node.classList.contains('highlighted-bookmark')) {
+                  existingHighlight = true;
+                  break;
+              }
+              node = node.parentNode;
+          }
+      }
       
-      if (!text) {
-        showToast("Pemberitahuan: Tidak ada text yang diblock. Silakan block text terlebih dahulu untuk membuat bookmark!");
+      if (!text && !existingHighlight) {
+        showToast("Notice: No text selected. Please select text or click on an existing bookmark!");
         return;
       }
       
-      // Jika ada teks diblock, tampilkan pemilih warna
+      // tampilin dropdown pilihan warna
       document.getElementById('reader-settings-dropdown').style.display = 'none';
       const colorDropdown = document.getElementById('bookmark-colors-dropdown');
       colorDropdown.style.display = colorDropdown.style.display === 'none' ? 'block' : 'none';
@@ -391,21 +469,154 @@ $dummy_content = "
     function applyBookmark(color) {
       const selection = window.getSelection();
       if (!selection.rangeCount) return;
-      const range = selection.getRangeAt(0);
-      const span = document.createElement('span');
-      span.style.backgroundColor = color;
-      span.style.color = '#000';
-      span.className = 'highlighted-bookmark';
       
-      try {
-        range.surroundContents(span);
-        selection.removeAllRanges();
-        showToast("Berhasil! Teks telah dibookmark dengan stabilo.");
-      } catch (e) {
-        showToast("Pemberitahuan: Harap pilih rentang text dalam satu paragraf saja.");
+      const range = selection.getRangeAt(0);
+      
+      // cek ada highlight yang dipilih ga
+      let existingHighlight = null;
+      let node = range.commonAncestorContainer;
+      while (node && node.id !== 'readerBody') {
+          if (node.nodeType === 1 && node.classList.contains('highlighted-bookmark')) {
+              existingHighlight = node;
+              break;
+          }
+          node = node.parentNode;
       }
+      
+      if (!existingHighlight) {
+          // cek kalo selection nutupin highlight yang udah ada
+          const frag = range.cloneContents();
+          if (frag.querySelectorAll('.highlighted-bookmark').length > 0) {
+              showToast("Notice: Please remove existing bookmarks within your selection first.");
+              document.getElementById('bookmark-colors-dropdown').style.display = 'none';
+              return;
+          }
+      }
+
+      if (existingHighlight) {
+         if (color === 'remove') {
+             const parent = existingHighlight.parentNode;
+             while (existingHighlight.firstChild) {
+                 parent.insertBefore(existingHighlight.firstChild, existingHighlight);
+             }
+             parent.removeChild(existingHighlight);
+             parent.normalize(); 
+             showToast("Bookmark removed successfully.");
+         } else {
+             existingHighlight.style.backgroundColor = color;
+             showToast("Bookmark color changed successfully.");
+         }
+      } else {
+         if (color === 'remove') {
+             showToast("No bookmark selected to remove.");
+             document.getElementById('bookmark-colors-dropdown').style.display = 'none';
+             return;
+         }
+         
+         const span = document.createElement('span');
+         span.style.backgroundColor = color;
+         span.style.color = '#000';
+         span.className = 'highlighted-bookmark';
+         
+         try {
+           range.surroundContents(span);
+           selection.removeAllRanges();
+           showToast("Success! Text has been highlighted.");
+         } catch (e) {
+           showToast("Notice: Please select text within a single paragraph without overlapping other elements.");
+           document.getElementById('bookmark-colors-dropdown').style.display = 'none';
+           return;
+         }
+      }
+      
+      updateProgressMarkers();
+      
+      // simpen perubahan highlight ke database
+      const htmlContent = document.getElementById('readerBody').innerHTML;
+      fetch('../actions/sync_book_data.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          book_id: bookId,
+          highlighted_html: htmlContent
+        })
+      });
+      
       document.getElementById('bookmark-colors-dropdown').style.display = 'none';
     }
+
+    function updateProgressMarkers() {
+      const container = document.querySelector('.reading-progress-container');
+      if (!container) return;
+      
+      // hapus marker lama dulu
+      container.querySelectorAll('.progress-marker').forEach(el => el.remove());
+      
+      const totalScrollHeight = document.documentElement.scrollHeight;
+      const screenWidth = window.innerWidth;
+      const marks = document.querySelectorAll('.highlighted-bookmark');
+      
+      const usedPixels = [];
+      const markerWidth = 40;
+      
+      marks.forEach(mark => {
+        const rect = mark.getBoundingClientRect();
+        const absoluteY = window.pageYOffset + rect.top;
+        
+        // hitung posisi marker di progress bar
+        let targetPx = (absoluteY / totalScrollHeight) * screenWidth;
+        
+        // biar marker yg berdekatan nyambung jadi satu
+        usedPixels.sort((a,b) => a - b);
+        for (let p of usedPixels) {
+          if (targetPx > p - markerWidth && targetPx < p + markerWidth) {
+             targetPx = p + markerWidth - 0.5;
+          }
+        }
+        usedPixels.push(targetPx);
+        
+        const marker = document.createElement('div');
+        marker.className = 'progress-marker';
+        marker.style.position = 'absolute';
+        marker.style.left = targetPx + 'px';
+        marker.style.top = '0';
+        marker.style.width = markerWidth + 'px';
+        marker.style.height = '100%';
+        marker.style.backgroundColor = mark.style.backgroundColor || '#ffd255';
+        marker.style.zIndex = '1001';
+        marker.style.cursor = 'pointer';
+        marker.title = 'Highlighted Text';
+        marker.style.borderRadius = '0px';
+        // biar lebih keliatan terang
+        marker.style.boxShadow = '0 0 12px ' + (mark.style.backgroundColor || '#ffd255');
+        marker.style.opacity = '1'; 
+        marker.style.transition = 'all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
+        marker.style.transformOrigin = 'bottom';
+        
+        marker.onmouseover = () => {
+           marker.style.transform = 'scaleY(2.5)';
+        };
+        marker.onmouseout = () => {
+           marker.style.transform = 'scaleY(1)';
+        };
+        
+        // klik marker = scroll ke posisi bookmark
+        marker.addEventListener('click', (e) => {
+          e.stopPropagation();
+          window.scrollTo({
+            top: absoluteY - 100,
+            behavior: 'smooth'
+          });
+        });
+        
+        container.appendChild(marker);
+      });
+    }
+
+    window.addEventListener('resize', () => {
+      clearTimeout(window.resizeTimeout);
+      window.resizeTimeout = setTimeout(updateProgressMarkers, 200);
+    });
 
     function createToastContainer() {
       const div = document.createElement('div');
@@ -449,48 +660,53 @@ $dummy_content = "
       if (colorDropdown) colorDropdown.style.display = 'none';
     });
 
-    // Font Size Logic
-    let currentFontSize = 20;
+    // logika ukuran font
+    let currentFontSize = <?php echo $font_size; ?>;
+    document.getElementById('readerBody').style.fontSize = currentFontSize + 'px';
+    
     function changeFontSize(delta) {
       currentFontSize += delta;
       if(currentFontSize < 14) currentFontSize = 14;
       if(currentFontSize > 32) currentFontSize = 32;
       document.getElementById('readerBody').style.fontSize = currentFontSize + 'px';
-      localStorage.setItem('libry_fontsize', currentFontSize);
+      
+      fetch('../actions/sync_settings.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ font_size: currentFontSize })
+      });
     }
 
-    // Theme Logic
+    // logika ganti tema
+    const currentTheme = '<?php echo $theme; ?>';
+    if(currentTheme !== 'light') document.body.classList.add('theme-' + currentTheme);
+    
     function setTheme(theme) {
       document.body.className = '';
       if(theme !== 'light') document.body.classList.add('theme-' + theme);
-      localStorage.setItem('libry_theme', theme);
+      
+      fetch('../actions/sync_settings.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ theme: theme })
+      });
     }
 
-    // On Load Restore Settings and Progress
+    // pas load halaman, restore posisi baca & marker
     document.addEventListener('DOMContentLoaded', () => {
-      // Restore Font Size
-      const savedFont = localStorage.getItem('libry_fontsize');
-      if(savedFont) {
-        currentFontSize = parseInt(savedFont);
-        document.getElementById('readerBody').style.fontSize = currentFontSize + 'px';
-      }
-      // Restore Theme
-      const savedTheme = localStorage.getItem('libry_theme');
-      if(savedTheme) setTheme(savedTheme);
+      // gambar marker bookmark yang udah ada
+      setTimeout(updateProgressMarkers, 500);
 
-      // Restore Progress
-      if (bookId > 0) {
-        const savedProgress = localStorage.getItem('libry_progress_' + bookId);
-        if (savedProgress && savedProgress > 0) {
-          // Delay scrolling slightly to ensure DOM is fully rendered
-          setTimeout(() => {
-            const height = document.documentElement.scrollHeight - document.documentElement.clientHeight;
-            window.scrollTo({
-              top: (savedProgress / 100) * height,
-              behavior: 'smooth'
-            });
-          }, 300);
-        }
+      const savedProgress = <?php echo $saved_progress; ?>;
+      if (bookId > 0 && savedProgress > 0) {
+        // scroll ke posisi terakhir baca
+        setTimeout(() => {
+          const height = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+          window.scrollTo({
+            top: (savedProgress / 100) * height,
+            behavior: 'smooth'
+          });
+        }, 300);
       }
     });
   </script>

@@ -5,29 +5,45 @@ if (!isset($_SESSION['user_id'])) {
     exit;
 }
 
-if (!isset($_SESSION['favorites'])) { $_SESSION['favorites'] = []; }
+$user_id = $_SESSION['user_id'];
 
-// Handle AJAX remove favorite
+// handle hapus favorit pake ajax
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'remove_favorite') {
     $book_id = intval($_POST['book_id']);
-    if (($key = array_search($book_id, $_SESSION['favorites'])) !== false) {
-        unset($_SESSION['favorites'][$key]);
-        $_SESSION['favorites'] = array_values($_SESSION['favorites']);
+    if (file_exists('../config/koneksi.php')) {
+        require_once '../config/koneksi.php';
+        if (isset($conn)) {
+            $del = $conn->prepare("DELETE FROM favourites WHERE user_id = ? AND book_id = ?");
+            $del->bind_param("ii", $user_id, $book_id);
+            $del->execute();
+        }
     }
     exit;
 }
 
 $books = [];
-$favorites = $_SESSION['favorites'];
+$purchased_ids = [];
 
-if (!empty($favorites) && file_exists('../config/koneksi.php')) {
+if (file_exists('../config/koneksi.php')) {
     require_once '../config/koneksi.php';
     if (isset($conn) && !$conn->connect_error) {
-        $ids = implode(',', array_map('intval', $favorites));
-        $result = $conn->query("SELECT * FROM books WHERE id IN ($ids)");
+        $stmt_fav = $conn->prepare("SELECT books.*, COALESCE(categories.name, 'General') as cat_name FROM favourites JOIN books ON favourites.book_id = books.id LEFT JOIN categories ON books.category_id = categories.id WHERE favourites.user_id = ?");
+        $stmt_fav->bind_param("i", $user_id);
+        $stmt_fav->execute();
+        $result = $stmt_fav->get_result();
         if ($result) {
             while($row = $result->fetch_assoc()) {
                 $books[] = $row;
+            }
+        }
+        
+        $stmt_purch = $conn->prepare("SELECT book_id FROM purchases WHERE user_id = ?");
+        $stmt_purch->bind_param("i", $user_id);
+        $stmt_purch->execute();
+        $p_res = $stmt_purch->get_result();
+        if ($p_res) {
+            while($p_row = $p_res->fetch_assoc()) {
+                $purchased_ids[] = $p_row['book_id'];
             }
         }
     }
@@ -84,7 +100,7 @@ if (!empty($favorites) && file_exists('../config/koneksi.php')) {
       <div class="category-grid" id="favoritesGrid">
         <?php if (!empty($books)): ?>
             <?php foreach($books as $book): 
-                $is_bought = (isset($_SESSION['purchased']) && in_array($book['id'], $_SESSION['purchased'])) || ($book['id'] % 2 == 0); // Temporary logic matching profile
+                $is_bought = in_array($book['id'], $purchased_ids); 
                 $target_url = $is_bought ? "read.php?id=" . $book['id'] : "detail.php?id=" . $book['id'];
             ?>
             <div class="cat-card" style="cursor: pointer;" onclick="window.location.href='<?php echo $target_url; ?>'">
@@ -95,7 +111,7 @@ if (!empty($favorites) && file_exists('../config/koneksi.php')) {
                 <div style="flex: 1; min-width: 0;">
                   <div class="cat-card-title" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"><?php echo htmlspecialchars($book['title']); ?></div>
                   <div class="cat-card-cat" style="color: <?php echo $is_bought ? '#2b8a3e' : 'var(--text-muted)'; ?>; font-weight: <?php echo $is_bought ? '600' : 'normal'; ?>;">
-                    <?php echo $is_bought ? '✓ Purchased' : 'Category ID: ' . htmlspecialchars($book['category_id']); ?>
+                    <?php echo $is_bought ? '✓ Purchased' : htmlspecialchars($book['cat_name'] ?? 'General'); ?>
                   </div>
                 </div>
                 <button class="btn-remove-fav" style="flex-shrink: 0;" onclick="event.stopPropagation(); removeFavorite(this, <?php echo $book['id']; ?>)">
@@ -116,7 +132,7 @@ if (!empty($favorites) && file_exists('../config/koneksi.php')) {
 
   <script>
     function removeFavorite(btn, bookId) {
-      // Remove visually
+      // hapus dari tampilan
       const card = btn.closest('.cat-card');
       card.style.transform = 'scale(0.9)';
       card.style.opacity = '0';
@@ -126,7 +142,7 @@ if (!empty($favorites) && file_exists('../config/koneksi.php')) {
         checkEmptyFavorites();
       }, 300);
       
-      // Make AJAX call to update session
+      // kirim request hapus ke server
       const formData = new FormData();
       formData.append('action', 'remove_favorite');
       formData.append('book_id', bookId);

@@ -5,41 +5,57 @@ if (!isset($_SESSION['user_id'])) {
     exit;
 }
 
-if (!isset($_SESSION['cart'])) { $_SESSION['cart'] = []; }
-if (!isset($_SESSION['purchased'])) { $_SESSION['purchased'] = []; }
+$user_id = $_SESSION['user_id'];
 
-// Handle POST actions
+// handle aksi dari form (tambah/hapus)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($_POST['action'] === 'remove_cart') {
         $book_id = intval($_POST['book_id']);
-        if (($key = array_search($book_id, $_SESSION['cart'])) !== false) {
-            unset($_SESSION['cart'][$key]);
-            $_SESSION['cart'] = array_values($_SESSION['cart']);
+        if (file_exists('../config/koneksi.php')) {
+            require_once '../config/koneksi.php';
+            if (isset($conn)) {
+                $del = $conn->prepare("DELETE FROM cart WHERE user_id = ? AND book_id = ?");
+                $del->bind_param("ii", $user_id, $book_id);
+                $del->execute();
+            }
         }
         header("Location: cart.php");
         exit;
     }
 }
 
-// Fetch books from DB
+// ambil data buku dari database
 $books = [];
 $total_price = 0;
-if (!empty($_SESSION['cart']) && file_exists('../config/koneksi.php')) {
+$owned_books = 0;
+
+if (file_exists('../config/koneksi.php')) {
     require_once '../config/koneksi.php';
     if (isset($conn) && !$conn->connect_error) {
-        $ids = implode(',', array_map('intval', $_SESSION['cart']));
-        $result = $conn->query("SELECT * FROM books WHERE id IN ($ids)");
+        // ambil data cart beserta nama kategorinya
+        $stmt_cart = $conn->prepare("SELECT books.*, COALESCE(categories.name, 'General') as cat_name FROM cart JOIN books ON cart.book_id = books.id LEFT JOIN categories ON books.category_id = categories.id WHERE cart.user_id = ?");
+        $stmt_cart->bind_param("i", $user_id);
+        $stmt_cart->execute();
+        $result = $stmt_cart->get_result();
         if ($result) {
             while($row = $result->fetch_assoc()) {
                 $books[] = $row;
                 $total_price += $row['price'] ?? 0;
             }
         }
+        
+        // hitung jumlah buku yg dimiliki buat membership
+        $own_stmt = $conn->prepare("SELECT COUNT(*) as count FROM purchases WHERE user_id = ?");
+        $own_stmt->bind_param("i", $user_id);
+        $own_stmt->execute();
+        $own_res = $own_stmt->get_result();
+        if ($own_res && $own_res->num_rows > 0) {
+            $owned_books = $own_res->fetch_assoc()['count'];
+        }
     }
 }
 
-// Membership Tier Logic
-$owned_books = count($_SESSION['purchased'] ?? []);
+// tentuin level membership user
 $discount_rate = 0;
 $tax_rate = 0.10;
 
@@ -217,7 +233,7 @@ $grand_total = $subtotal_after_discount + $tax_amount;
               <img src="../asset/<?php echo htmlspecialchars($book['cover_image'] ?? 'logo.png'); ?>" alt="Book Cover" class="cart-item-img" onerror="this.src='../asset/logo.png'">
               <div class="cart-item-details">
                 <div class="cart-item-title"><?php echo htmlspecialchars($book['title']); ?></div>
-                <div class="cart-item-cat">Category ID: <?php echo htmlspecialchars($book['category_id']); ?></div>
+                <div class="cart-item-cat"><?php echo htmlspecialchars($book['cat_name'] ?? 'General'); ?></div>
                 <div class="cart-item-actions">
                   <div style="display: flex; align-items: center; gap: 8px;">
                     <button class="qty-btn" disabled>-</button>

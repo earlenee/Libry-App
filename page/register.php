@@ -1,6 +1,6 @@
 <?php
 session_start();
-// Jika sudah login, redirect
+// kalo udah login langsung redirect
 if(isset($_SESSION['user_id'])) {
     header("Location: dashboard.php");
     exit;

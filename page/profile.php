@@ -5,12 +5,26 @@ if (!isset($_SESSION['user_id'])) {
     exit;
 }
 
-if (!isset($_SESSION['purchased'])) { $_SESSION['purchased'] = []; }
+$user_id = $_SESSION['user_id'];
 
-// Handle Edit Profile Form Submission
+// proses edit profil
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'edit_profile') {
-    $_SESSION['name'] = $_POST['name'];
-    $_SESSION['email'] = $_POST['email'];
+    $new_name  = trim($_POST['name']);
+    $new_email = trim($_POST['email']);
+
+    if (!empty($new_name) && !empty($new_email)) {
+        if (file_exists('../config/koneksi.php')) {
+            require_once '../config/koneksi.php';
+            if (isset($conn) && !$conn->connect_error) {
+                $upd = $conn->prepare("UPDATE users SET name = ?, email = ? WHERE id = ?");
+                $upd->bind_param("ssi", $new_name, $new_email, $user_id);
+                $upd->execute();
+            }
+        }
+        // update session juga biar langsung keliatan berubah
+        $_SESSION['name']  = $new_name;
+        $_SESSION['email'] = $new_email;
+    }
     header("Location: profile.php?updated=1");
     exit;
 }
@@ -18,21 +32,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 $user_name = isset($_SESSION['name']) ? $_SESSION['name'] : 'User';
 $user_email = isset($_SESSION['email']) ? $_SESSION['email'] : 'Update your email in Edit Profile';
 $initials = strtoupper(substr($user_name, 0, 2));
+$profile_pic = isset($_SESSION['profile_pic']) && !empty($_SESSION['profile_pic']) ? '../asset/' . $_SESSION['profile_pic'] : '';
 
-// Fetch purchased books
+// ambil data buku & statistik user dari database
 $purchased_books = [];
-if (!empty($_SESSION['purchased']) && file_exists('../config/koneksi.php')) {
+$streak_count = 0;
+
+if (file_exists('../config/koneksi.php')) {
     require_once '../config/koneksi.php';
     if (isset($conn) && !$conn->connect_error) {
-        $ids = implode(',', array_map('intval', $_SESSION['purchased']));
-        $result = $conn->query("SELECT * FROM books WHERE id IN ($ids)");
-        if ($result) {
-            while($row = $result->fetch_assoc()) {
+        // ambil streak
+        $q_user = $conn->prepare("SELECT streak_count FROM users WHERE id = ?");
+        $q_user->bind_param("i", $user_id);
+        $q_user->execute();
+        $res_user = $q_user->get_result();
+        if ($res_user && $res_user->num_rows > 0) {
+            $streak_count = $res_user->fetch_assoc()['streak_count'];
+        }
+
+        // ambil buku yg udah dibeli
+        $q_purch = $conn->prepare("SELECT books.* FROM purchases JOIN books ON purchases.book_id = books.id WHERE purchases.user_id = ?");
+        $q_purch->bind_param("i", $user_id);
+        $q_purch->execute();
+        $res_purch = $q_purch->get_result();
+        if ($res_purch && $res_purch->num_rows > 0) {
+            while($row = $res_purch->fetch_assoc()) {
                 $purchased_books[] = $row;
             }
         }
     }
 }
+
+$owned_books = count($purchased_books);
+
+// tentuin status member berdasarkan jumlah buku
+if ($owned_books >= 20) {
+    $member_status = "Gold";
+    $member_badge = '<div style="display:inline-block; padding:6px 16px; background:rgba(255,215,0,0.15); color:#b8860b; border-radius:999px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; border:1px solid rgba(255,215,0,0.3);">Gold Member</div>';
+} elseif ($owned_books >= 5) {
+    $member_status = "Silver";
+    $member_badge = '<div style="display:inline-block; padding:6px 16px; background:rgba(192,192,192,0.2); color:#666; border-radius:999px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; border:1px solid rgba(192,192,192,0.4);">Silver Member</div>';
+} else {
+    $member_status = "Regular";
+    $member_badge = '<div style="display:inline-block; padding:6px 16px; background:rgba(0,0,0,0.05); color:var(--text-muted); border-radius:999px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; border:1px solid rgba(0,0,0,0.1);">Regular Member</div>';
+}
+
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -232,8 +276,8 @@ if (!empty($_SESSION['purchased']) && file_exists('../config/koneksi.php')) {
         <div class="profile-container" style="width: 100%; max-width: 900px; text-align: center; padding: 40px; background: white; border-radius: 16px; border: 1px solid rgba(0,0,0,0.05);">
           
           <div class="avatar-wrapper">
-            <div class="profile-avatar-large" id="profileAvatarLarge">
-              <span id="profileAvatarInitials"><?php echo $initials; ?></span>
+            <div class="profile-avatar-large" id="profileAvatarLarge" <?php if($profile_pic) echo "style=\"background-image: url('$profile_pic');\""; ?>>
+              <span id="profileAvatarInitials" <?php if($profile_pic) echo 'style="display:none;"'; ?>><?php echo $initials; ?></span>
             </div>
             <input type="file" id="profileImageInput" style="display: none;" accept="image/*" onchange="handleImageUpload(event)">
             <div class="avatar-edit-btn" onclick="document.getElementById('profileImageInput').click()" title="Change Profile Picture">
@@ -243,34 +287,24 @@ if (!empty($_SESSION['purchased']) && file_exists('../config/koneksi.php')) {
           
           <div class="profile-name" style="font-size: 24px;"><?php echo htmlspecialchars($user_name); ?></div>
           <div class="profile-email" style="color: var(--text-muted); margin-bottom: 12px;"><?php echo htmlspecialchars($user_email); ?></div>
-          <?php
-            $owned_books = count($_SESSION['purchased'] ?? []);
-            if ($owned_books >= 20) {
-                echo '<div style="display:inline-block; padding:6px 16px; background:rgba(255,215,0,0.15); color:#b8860b; border-radius:999px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; border:1px solid rgba(255,215,0,0.3);">Gold Member</div>';
-            } elseif ($owned_books >= 5) {
-                echo '<div style="display:inline-block; padding:6px 16px; background:rgba(192,192,192,0.2); color:#666; border-radius:999px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; border:1px solid rgba(192,192,192,0.4);">Silver Member</div>';
-            } else {
-                echo '<div style="display:inline-block; padding:6px 16px; background:rgba(0,0,0,0.05); color:var(--text-muted); border-radius:999px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; border:1px solid rgba(0,0,0,0.1);">Regular Member</div>';
-            }
-          ?>
+          <?php echo $member_badge; ?>
           
           <div class="profile-actions" style="margin-top: 24px;">
             <button class="btn-profile-primary" onclick="openEditProfile()">Edit Profile</button>
-            <button class="btn-profile-secondary" onclick="alert('Feature coming soon: Change Password')">Change Password</button>
           </div>
         </div>
 
         <div class="stats-container">
           <div class="stat-card">
-            <div class="stat-number"><?php echo count($purchased_books); ?></div>
+            <div class="stat-number"><?php echo $owned_books; ?></div>
             <div class="stat-label">Books Owned</div>
           </div>
           <div class="stat-card">
-            <div class="stat-number">3</div>
+            <div class="stat-number"><?php echo $streak_count; ?></div>
             <div class="stat-label">Day Streak</div>
           </div>
           <div class="stat-card">
-            <div class="stat-number" style="color: var(--rust);">Gold</div>
+            <div class="stat-number" style="color: var(--rust);"><?php echo $member_status; ?></div>
             <div class="stat-label">Member Status</div>
           </div>
         </div>
@@ -327,7 +361,7 @@ if (!empty($_SESSION['purchased']) && file_exists('../config/koneksi.php')) {
       modal.classList.remove('active');
     }
 
-    // Close modal on outside click
+    // tutup modal kalo klik diluar
     window.onclick = function(event) {
       const modal = document.getElementById('editProfileModal');
       if (event.target == modal) {
@@ -338,21 +372,34 @@ if (!empty($_SESSION['purchased']) && file_exists('../config/koneksi.php')) {
     function handleImageUpload(event) {
       const file = event.target.files[0];
       if (file) {
-        const reader = new FileReader();
-        reader.onload = function(e) {
-          const dataUrl = e.target.result;
-          localStorage.setItem('profilePic', dataUrl);
-          applyProfilePic(dataUrl);
-          
-          // Show toast
-          const toast = document.getElementById('successToast');
-          if (toast) {
-            toast.textContent = "Profile picture updated!";
-            toast.classList.add('show');
-            setTimeout(() => toast.classList.remove('show'), 3000);
+        const formData = new FormData();
+        formData.append('profile_image', file);
+
+        fetch('../actions/upload_pfp.php', {
+          method: 'POST',
+          body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+          if (data.status === 'success') {
+            const dataUrl = '../asset/' + data.path + '?t=' + new Date().getTime();
+            applyProfilePic(dataUrl);
+            
+            // tampilin notif
+            const toast = document.getElementById('successToast');
+            if (toast) {
+              toast.textContent = "Profile picture updated in database!";
+              toast.classList.add('show');
+              setTimeout(() => toast.classList.remove('show'), 3000);
+            }
+          } else {
+            alert('Error: ' + data.message);
           }
-        }
-        reader.readAsDataURL(file);
+        })
+        .catch(error => {
+          console.error('Error:', error);
+          alert('An error occurred during upload.');
+        });
       }
     }
 
@@ -365,7 +412,7 @@ if (!empty($_SESSION['purchased']) && file_exists('../config/koneksi.php')) {
         avatarInitials.style.display = 'none';
       }
       
-      // Update top navbar avatar if it exists
+      // update juga foto di navbar atas
       const navAvatar = document.querySelector('.nav-profile .avatar');
       if (navAvatar) {
         navAvatar.style.backgroundImage = `url(${dataUrl})`;
@@ -375,14 +422,8 @@ if (!empty($_SESSION['purchased']) && file_exists('../config/koneksi.php')) {
       }
     }
 
-    // Handle toast success and load profile pic
+    // tampilin toast kalo checkout sukses
     document.addEventListener('DOMContentLoaded', () => {
-      // Load saved profile pic
-      const savedPic = localStorage.getItem('profilePic');
-      if (savedPic) {
-        applyProfilePic(savedPic);
-      }
-
       const toast = document.getElementById('successToast');
       if (toast && toast.textContent.trim() !== '') {
         setTimeout(() => {

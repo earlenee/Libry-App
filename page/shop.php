@@ -5,7 +5,7 @@ if (!isset($_SESSION['user_id'])) {
     exit;
 }
 
-// Ensure the connection script exists before requiring
+// pastiin file koneksi ada sebelum di-require
 $books = [];
 $categories = [];
 $cat_map = [];
@@ -107,7 +107,7 @@ if (file_exists('../config/koneksi.php')) {
         if(btnElement) {
             btnElement.classList.add('active');
             
-            // Animasi memantul pada indikator kategori
+            // animasi memantul buat indikator kategori
             const indicator = document.querySelector('.pill-indicator');
             if (indicator) {
                 const offset = btnElement.offsetLeft - 6; 
@@ -169,7 +169,7 @@ if (file_exists('../config/koneksi.php')) {
                 if (title.includes(query)) {
                     card.style.display = 'flex';
                     hasVisible = true;
-                    card.offsetHeight; // trigger reflow
+                    card.offsetHeight;
                     setTimeout(() => {
                         card.style.transition = 'all 0.5s cubic-bezier(0.34, 1.25, 0.64, 1)';
                         card.style.opacity = '1';

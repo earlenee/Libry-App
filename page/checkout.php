@@ -5,45 +5,99 @@ if (!isset($_SESSION['user_id'])) {
     exit;
 }
 
-if (!isset($_SESSION['cart']) || empty($_SESSION['cart'])) {
-    header("Location: cart.php");
-    exit;
-}
-if (!isset($_SESSION['purchased'])) { $_SESSION['purchased'] = []; }
+$user_id = $_SESSION['user_id'];
 
-// Handle Checkout Process
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pay_now'])) {
-    // Move cart items to purchased
-    foreach ($_SESSION['cart'] as $item) {
-        if (!in_array($item, $_SESSION['purchased'])) {
-            $_SESSION['purchased'][] = $item;
-        }
-    }
-    // Clear cart
-    $_SESSION['cart'] = [];
-    header("Location: profile.php?checkout_success=1");
-    exit;
-}
-
-// Fetch books from DB
+// cek cart kosong atau engga
+$cart_empty = true;
 $books = [];
 $total_price = 0;
+$owned_books = 0;
+
 if (file_exists('../config/koneksi.php')) {
     require_once '../config/koneksi.php';
     if (isset($conn) && !$conn->connect_error) {
-        $ids = implode(',', array_map('intval', $_SESSION['cart']));
-        $result = $conn->query("SELECT * FROM books WHERE id IN ($ids)");
+        $c_stmt = $conn->prepare("SELECT book_id FROM cart WHERE user_id = ?");
+        $c_stmt->bind_param("i", $user_id);
+        $c_stmt->execute();
+        $c_res = $c_stmt->get_result();
+        if ($c_res && $c_res->num_rows > 0) {
+            $cart_empty = false;
+        }
+
+        if ($cart_empty) {
+            header("Location: cart.php");
+            exit;
+        }
+
+        // proses checkout
+        if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pay_now'])) {
+            // ambil judul buku dulu buat notifikasi
+            $titles_stmt = $conn->prepare("SELECT books.title FROM cart JOIN books ON cart.book_id = books.id WHERE cart.user_id = ?");
+            $titles_stmt->bind_param("i", $user_id);
+            $titles_stmt->execute();
+            $titles_res = $titles_stmt->get_result();
+            $bought_titles = [];
+            while ($t = $titles_res->fetch_assoc()) {
+                $bought_titles[] = $t['title'];
+            }
+
+            // pindahin item dari cart ke tabel purchases
+            $stmt_cart = $conn->prepare("SELECT book_id FROM cart WHERE user_id = ?");
+            $stmt_cart->bind_param("i", $user_id);
+            $stmt_cart->execute();
+            $cart_items = $stmt_cart->get_result();
+            $ins_purch = $conn->prepare("INSERT IGNORE INTO purchases (user_id, book_id) VALUES (?, ?)");
+            while ($row = $cart_items->fetch_assoc()) {
+                $b_id = $row['book_id'];
+                $ins_purch->bind_param("ii", $user_id, $b_id);
+                $ins_purch->execute();
+            }
+            // kosongin cart setelah checkout
+            $del = $conn->prepare("DELETE FROM cart WHERE user_id = ?");
+            $del->bind_param("i", $user_id);
+            $del->execute();
+
+            // tambahin notif pembelian ke session
+            if (!isset($_SESSION['notifications'])) $_SESSION['notifications'] = [];
+            $book_list = implode(', ', $bought_titles);
+            $_SESSION['notifications'][] = [
+                'icon' => 'cart',
+                'color' => '#1e3655',
+                'title' => 'Purchase Successful!',
+                'message' => 'You have purchased: ' . $book_list . '. Books are now available in My Library.',
+                'time' => 'Just now'
+            ];
+
+            header("Location: profile.php?checkout_success=1");
+            exit;
+        }
+
+        // ambil data buku dari cart buat ringkasan
+        $stmt_books = $conn->prepare("SELECT books.* FROM cart JOIN books ON cart.book_id = books.id WHERE cart.user_id = ?");
+        $stmt_books->bind_param("i", $user_id);
+        $stmt_books->execute();
+        $result = $stmt_books->get_result();
         if ($result) {
             while($row = $result->fetch_assoc()) {
                 $books[] = $row;
                 $total_price += $row['price'] ?? 0;
             }
         }
+        
+        // Fetch owned books count for membership logic
+        $own_stmt = $conn->prepare("SELECT COUNT(*) as count FROM purchases WHERE user_id = ?");
+        $own_stmt->bind_param("i", $user_id);
+        $own_stmt->execute();
+        $own_res = $own_stmt->get_result();
+        if ($own_res && $own_res->num_rows > 0) {
+            $owned_books = $own_res->fetch_assoc()['count'];
+        }
     }
+} else {
+    die("Database connection failed.");
 }
 
-// Membership Tier Logic
-$owned_books = count($_SESSION['purchased'] ?? []);
+// logika diskon membership
 $discount_rate = 0;
 $tax_rate = 0.10;
 
@@ -63,6 +117,7 @@ $grand_total = $subtotal_after_discount + $tax_amount;
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Checkout - LIBRY Secure Pay</title>
   <link rel="stylesheet" href="../styles.css">
   <style>
@@ -173,9 +228,6 @@ $grand_total = $subtotal_after_discount + $tax_amount;
       flex-direction: column;
       gap: 16px;
       margin-top: 16px;
-    }
-    .payment-method.active + .card-details {
-      display: flex;
     }
     
     .input-group {
@@ -333,7 +385,7 @@ $grand_total = $subtotal_after_discount + $tax_amount;
               <div class="payment-name">Credit Card</div>
               <div class="payment-radio"></div>
             </div>
-            <div class="card-details">
+            <div class="card-details" style="display: flex;">
               <div class="input-group">
                 <label>Cardholder Name</label>
                 <input type="text" placeholder="John Doe" value="<?php echo isset($_SESSION['name']) ? htmlspecialchars($_SESSION['name']) : ''; ?>" required>
@@ -430,10 +482,16 @@ $grand_total = $subtotal_after_discount + $tax_amount;
     function selectMethod(el) {
       document.querySelectorAll('.payment-method').forEach(m => m.classList.remove('active'));
       el.classList.add('active');
+      // tampilin form detail kalo metode pembayaran dipilih
+      document.querySelectorAll('.card-details').forEach(d => d.style.display = 'none');
+      const details = el.nextElementSibling;
+      if (details && details.classList.contains('card-details')) {
+        details.style.display = 'flex';
+      }
     }
     
     function processPayment() {
-      // Basic validation for Credit Card if active
+      // validasi input kartu kredit
       const ccActive = document.querySelectorAll('.payment-method')[0].classList.contains('active');
       if (ccActive) {
         const inputs = document.querySelectorAll('.card-details input');
@@ -448,7 +506,7 @@ $grand_total = $subtotal_after_discount + $tax_amount;
       const btn = document.querySelector('.btn-pay');
       btn.classList.add('loading');
       
-      // Simulate network request delay
+      // simulasi loading sebelum submit
       setTimeout(() => {
         document.getElementById('paymentForm').submit();
       }, 2000);
