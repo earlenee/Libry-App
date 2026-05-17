@@ -207,3 +207,4 @@ libry_db
 ## 📄 Lisensi
 
 Project ini dibuat untuk keperluan edukasi.
+.
