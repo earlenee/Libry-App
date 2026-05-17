@@ -197,7 +197,10 @@ libry_db
 
 ## 👨‍💻 Dibuat Oleh
 
-Proyek ini dibuat sebagai tugas pembelajaran pengembangan web di SMK.
+- Ananda Yosi Marsania (5) (hipster)
+- Earlene Nuri Aulia (9) (hipster)
+- Griselda Felixia Santoso (12) (hustler)
+- Zahida Hulwa Fadila(32) (hacker)
 
 ---
 
