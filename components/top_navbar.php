@@ -106,14 +106,29 @@ else if ($current_file == 'cart.php') $page_title = "Cart";
 function toggleSidebar() {
   const sidebar = document.querySelector('.sidebar');
   if (sidebar) {
-    sidebar.classList.toggle('closed');
-    if (sidebar.classList.contains('closed')) {
-      localStorage.setItem('sidebarState', 'closed');
+    if (window.innerWidth <= 768) {
+      sidebar.classList.toggle('open');
     } else {
-      localStorage.setItem('sidebarState', 'open');
+      sidebar.classList.toggle('closed');
+      if (sidebar.classList.contains('closed')) {
+        localStorage.setItem('sidebarState', 'closed');
+      } else {
+        localStorage.setItem('sidebarState', 'open');
+      }
     }
   }
 }
+
+// close sidebar on mobile if clicked outside
+document.addEventListener('click', function(e) {
+  if (window.innerWidth <= 768) {
+    const sidebar = document.querySelector('.sidebar');
+    const toggle = document.querySelector('.menu-toggle');
+    if (sidebar && sidebar.classList.contains('open') && !sidebar.contains(e.target) && !toggle.contains(e.target)) {
+      sidebar.classList.remove('open');
+    }
+  }
+});
 
 function toggleProfileDropdown(e) {
   e.stopPropagation();

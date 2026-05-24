@@ -25,6 +25,7 @@ if(isset($_SESSION['user_id'])) {
       display: flex;
       width: 100%;
       min-height: 100vh;
+      flex-direction: row-reverse;
     }
     
     .auth-left {
